@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Index, Numeric, String
 
-from app.model_data.database import Base
+from .database import Base
 
 
 class Contenedor(Base):

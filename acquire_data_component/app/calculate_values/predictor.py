@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.model_data.models import Ensayo, Mezcla, Residuos, ResiduosMezcla
+from ..model_data.models import Ensayo, Mezcla, Residuos, ResiduosMezcla
 
 
 INPUT_COLUMNS = [

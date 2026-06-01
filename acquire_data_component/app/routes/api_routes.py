@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.calculate_values.predictor import MotorCalculo
-from app.model_data.database import get_db
-from app.model_data.schemas import PrediccionEnsayoSalida, PrediccionLoteSalida
+from ..calculate_values.predictor import MotorCalculo
+from ..model_data.database import get_db
+from ..model_data.schemas import PrediccionEnsayoSalida, PrediccionLoteSalida
 
 router = APIRouter()
 calculador = MotorCalculo()
