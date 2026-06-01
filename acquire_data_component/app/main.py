@@ -3,9 +3,7 @@ from fastapi import FastAPI
 from app.routes.api_routes import router
 from app.middleware.core_middleware import setup_middleware
 from app.model_data import database
-
-# Crear las tablas en la BD si no existen (opcional, si ya corriste el script SQL)
-database.Base.metadata.create_all(bind=database.engine)
+from app.model_data import models  # noqa: F401
 
 app = FastAPI(title="Acquire Data Component API")
 

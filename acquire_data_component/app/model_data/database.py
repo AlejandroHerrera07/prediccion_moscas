@@ -1,17 +1,36 @@
-# app/model_data/database.py
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Para tu fase inicial local (ej. PostgreSQL local o SQLite)
-# Cuando pases a la nube, solo cambias esta URL por la de tu proveedor
-SQLALCHEMY_DATABASE_URL = "postgresql://usuario:contraseña@localhost:5432/biodegradacion_db"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(PROJECT_ROOT / ".env")
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+db_user = os.getenv("DB_USER", "postgres")
+db_password = os.getenv("DB_PASSWORD", "postgres")
+db_host = os.getenv("DB_HOST", "localhost")
+db_port = os.getenv("DB_PORT", "5432")
+db_name = os.getenv("DB_NAME", "moscas")
+
+database_url = URL.create(
+    drivername="postgresql+pg8000",
+    username=db_user,
+    password=db_password,
+    host=db_host,
+    port=int(db_port),
+    database=db_name,
+)
+
+engine = create_engine(database_url)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 
 Base = declarative_base()
 
-# Dependencia para inyectar la sesión de la BD en las rutas
 def get_db():
     db = SessionLocal()
     try:

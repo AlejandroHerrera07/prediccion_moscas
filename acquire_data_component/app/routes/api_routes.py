@@ -1,19 +1,25 @@
-# app/routes/api_routes.py
-from fastapi import APIRouter
-from app.model_data.schemas import PrediccionEntrada, PrediccionSalida
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
 from app.calculate_values.predictor import MotorCalculo
+from app.model_data.database import get_db
+from app.model_data.schemas import PrediccionEnsayoSalida, PrediccionLoteSalida
 
 router = APIRouter()
 calculador = MotorCalculo()
 
-# Usamos PrediccionSalida para formatear la respuesta
-@router.post("/prediccion", response_model=PrediccionSalida)
-def obtener_prediccion(datos_entrada: PrediccionEntrada): # Usamos PrediccionEntrada para validar lo que entra
-    
-    # Si FastAPI deja pasar el código hasta aquí, significa que los datos_entrada
-    # son 100% correctos y no falta ninguna variable.
-    
-    # Convertimos el esquema validado a un diccionario para la matemática
-    resultado = calculador.calcular_predicciones(datos_entrada.model_dump())
-    
-    return resultado
+
+@router.get("/prediccion", response_model=PrediccionLoteSalida)
+def obtener_prediccion(db: Session = Depends(get_db)):
+    try:
+        return calculador.calcular_predicciones(db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/prediccion/{id_ensayo}", response_model=PrediccionEnsayoSalida)
+def obtener_prediccion_ensayo(id_ensayo: str, db: Session = Depends(get_db)):
+    try:
+        return calculador.calcular_prediccion_ensayo(db, id_ensayo)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

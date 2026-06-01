@@ -1,60 +1,55 @@
-# app/model_data/schemas.py
-from pydantic import BaseModel, Field
-from datetime import datetime
-from typing import Optional
+from __future__ import annotations
 
-# ==========================================
-# 1. ESQUEMAS PARA IOT (Raspberry Pi)
-# ==========================================
+from datetime import datetime
+
+from pydantic import BaseModel, Field
+
+
 class RegistroSensorCrear(BaseModel):
-    """
-    Valida los datos en tiempo real que envía la Raspberry Pi 
-    desde el componente 'Capture_data'.
-    """
     id_contenedor: str = Field(..., max_length=30)
     id_sensor: str = Field(..., max_length=30)
     fecha: datetime
     valor: float
 
-# ==========================================
-# 2. ESQUEMAS PARA EL MOTOR DE PREDICCIÓN
-# ==========================================
-class PrediccionEntrada(BaseModel):
-    """
-    Valida las 26 variables fisicoquímicas necesarias para 
-    el módulo 'Calculate_values'.
-    """
-    Temperatura: float
-    Relacion_C_N: float
-    Humedad: float
-    pH: float
-    Cenizas: float
-    Carbono_organico_total_oxidable: float
-    Nitrogeno_total: float
-    Fosforo_total: float
-    Potasio_total: float
-    Calcio_total: float
-    Magnesio_total: float
-    Densidad_g_cm3: float
-    Lignina_db: float
-    
-    Mezcla_Humedad: float
-    Mezcla_pH: float
-    Mezcla_Cenizas: float
-    Mezcla_C_Org: float
-    Mezcla_N_Total: float
-    Mezcla_C_N: float
-    Mezcla_P_Total: float
-    Mezcla_K_Total: float
-    Mezcla_Ca_Total: float
-    Mezcla_Mg_Total: float
-    Mezcla_Densidad: float
-    Mezcla_Lignina: float
 
-class PrediccionSalida(BaseModel):
-    """
-    Estructura la respuesta que se le devolverá al 'Visualization_component'.
-    """
-    larva_proteina_predicha: float
-    frass_n_total_predicho: float
-    estado: str
+class LarvaMetrics(BaseModel):
+    humedad: float | None = None
+    n_organico: float | None = None
+    grasa: float | None = None
+    proteina: float | None = None
+
+
+class FrassMetrics(BaseModel):
+    humedad: float | None = None
+    ph: float | None = None
+    cenizas: float | None = None
+    c_organico: float | None = None
+    n_total: float | None = None
+    c_n: float | None = None
+    fosforo: float | None = None
+    potasio: float | None = None
+    densidad: float | None = None
+
+
+class PrediccionRegistro(BaseModel):
+    id_ensayo: str
+    id_mezcla: str
+    residuo_base: str | None = None
+    temperatura: float
+    relacion_c_n: float
+    larvas_observadas: LarvaMetrics
+    larvas_predichas: LarvaMetrics
+    frass_observado: FrassMetrics
+    frass_predicho: FrassMetrics
+    tasa_bioconversion: float | None = None
+
+
+class PrediccionLoteSalida(BaseModel):
+    total_ensayos: int
+    temperatura_optima: float | None = None
+    tasa_bioconversion_maxima: float | None = None
+    resultados: list[PrediccionRegistro]
+
+
+class PrediccionEnsayoSalida(PrediccionRegistro):
+    pass
