@@ -77,6 +77,36 @@ class SupabaseRestClient:
             raise RuntimeError(f"Respuesta inesperada de Supabase para '{table_name}'.")
         return parsed
 
+    def insert(self, table_name: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        endpoint = urljoin(f"{self._supabase_url}/", f"rest/v1/{table_name}")
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            endpoint,
+            data=body,
+            method="POST",
+            headers={
+                "apikey": self._supabase_key,
+                "Authorization": f"Bearer {self._supabase_key}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation",
+            },
+        )
+
+        try:
+            with urlopen(request) as response:
+                raw = response.read().decode("utf-8")
+        except HTTPError as exc:
+            body_text = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"Error insertando en Supabase en '{table_name}': HTTP {exc.code} {exc.reason}. {body_text}"
+            ) from exc
+
+        parsed = json.loads(raw) if raw else []
+        if not isinstance(parsed, list):
+            raise RuntimeError(f"Respuesta inesperada de Supabase al insertar en '{table_name}'.")
+        return parsed
+
 
 def get_supabase_client() -> SupabaseRestClient:
     return SupabaseRestClient(SUPABASE_URL, SUPABASE_ANON_KEY)
