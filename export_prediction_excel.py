@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from pprint import pprint
-import os
 
 import pandas as pd
-from dotenv import load_dotenv
 
-from acquire_data_component.app.calculate_values.predictor import *
-from acquire_data_component.app.model_data.database import *
+from acquire_data_component.app.calculate_values.predictor import MotorCalculo
+from acquire_data_component.app.model_data.database import get_supabase_client
 
 
 OUTPUT_FILE = Path("predicciones_ensayos.xlsx")
@@ -52,13 +50,8 @@ def _flatten_registro(registro: dict) -> dict:
 
 
 def main() -> int:
-    load_dotenv(Path(".env"))
-
-    db = SessionLocal()
-    try:
-        resultado = MotorCalculo().calcular_predicciones(db)
-    finally:
-        db.close()
+    client = get_supabase_client()
+    resultado = MotorCalculo().calcular_predicciones(client)
 
     filas = [_flatten_registro(registro) for registro in resultado["resultados"]]
     df = pd.DataFrame(filas)

@@ -7,9 +7,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sqlalchemy.orm import Session
 
-from ..model_data.models import Ensayo, Mezcla, Residuos, ResiduosMezcla
+from ..model_data.database import get_supabase_client
 
 
 INPUT_COLUMNS = [
@@ -72,14 +71,21 @@ def _parse_relacion_cn(nombre_mezcla: str) -> float:
     return float(match.group("ratio"))
 
 
-def _weighted_average(componentes: list[tuple[Residuos, float]], field_name: str) -> float | None:
+def _row_value(row: dict[str, Any], *names: str, default: Any = None) -> Any:
+    for name in names:
+        if name in row and row[name] is not None:
+            return row[name]
+    return default
+
+
+def _weighted_average(componentes: list[tuple[dict[str, Any], float]], field_name: str) -> float | None:
     if not componentes:
         return None
 
     total = 0.0
     total_peso = 0.0
     for residuo, porcentaje in componentes:
-        valor = getattr(residuo, field_name)
+        valor = _row_value(residuo, field_name)
         if valor is None:
             continue
         peso = float(porcentaje) / 100.0
@@ -133,75 +139,85 @@ class MotorCalculo:
         ]
 
     def _cargar_tablas(
-        self, db: Session
-    ) -> tuple[list[Ensayo], dict[str, Mezcla], dict[str, Residuos], dict[str, list[tuple[Residuos, float]]]]:
-        ensayos = db.query(Ensayo).all()
-        mezclas = {mezcla.Id_Mezcla: mezcla for mezcla in db.query(Mezcla).all()}
-        residuos = {residuo.id_residuo: residuo for residuo in db.query(Residuos).all()}
+        self, client: Any
+    ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, list[tuple[dict[str, Any], float]]]]:
+        ensayos = client.table("Ensayo").select("*").execute().data or []
+        mezclas_raw = client.table("Mezcla").select("*").execute().data or []
+        residuos_raw = client.table("Residuos").select("*").execute().data or []
+        residuos_mezcla_raw = client.table("Residuos_Mezcla").select("*").execute().data or []
 
-        componentes: dict[str, list[tuple[Residuos, float]]] = {}
-        for fila in db.query(ResiduosMezcla).all():
-            residuo = residuos.get(fila.id_residuo)
+        mezclas = {str(_row_value(mezcla, "Id_Mezcla", "id_mezcla")): mezcla for mezcla in mezclas_raw}
+        residuos = {str(_row_value(residuo, "id_residuo")): residuo for residuo in residuos_raw}
+
+        componentes: dict[str, list[tuple[dict[str, Any], float]]] = {}
+        for fila in residuos_mezcla_raw:
+            id_mezcla = str(_row_value(fila, "id_mezcla"))
+            id_residuo = str(_row_value(fila, "id_residuo"))
+            residuo = residuos.get(id_residuo)
             if residuo is None:
                 continue
-            componentes.setdefault(fila.id_mezcla, []).append((residuo, float(fila.porcentaje)))
+            componentes.setdefault(id_mezcla, []).append((residuo, float(_row_value(fila, "porcentaje", default=0.0))))
 
         for item in componentes.values():
-            item.sort(key=lambda par: (-par[1], par[0].id_residuo))
+            item.sort(key=lambda par: (-par[1], str(_row_value(par[0], "id_residuo"))))
 
         return ensayos, mezclas, residuos, componentes
 
-    def _inferir_residuo_base(self, ensayos: list[Ensayo], residuos: dict[str, Residuos]) -> dict[str, Residuos | None]:
+    def _inferir_residuo_base(self, ensayos: list[dict[str, Any]], residuos: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any] | None]:
         """
         La base de datos no expone un FK directo entre ensayo y residuo base.
         Mientras el esquema no lo tenga, se reproduce el orden de carga del dataset.
         """
 
-        residuos_ordenados = sorted(residuos.values(), key=lambda r: _natural_key(r.id_residuo))
-        ensayos_ordenados = sorted(ensayos, key=lambda e: _natural_key(e.id_Ensayo))
-        mapa: dict[str, Residuos | None] = {}
+        residuos_ordenados = sorted(residuos.values(), key=lambda r: _natural_key(str(_row_value(r, "id_residuo"))))
+        ensayos_ordenados = sorted(ensayos, key=lambda e: _natural_key(str(_row_value(e, "id_Ensayo", "id_ensayo"))))
+        mapa: dict[str, dict[str, Any] | None] = {}
         for indice, ensayo in enumerate(ensayos_ordenados):
-            mapa[ensayo.id_Ensayo] = residuos_ordenados[indice] if indice < len(residuos_ordenados) else None
+            ensayo_id = str(_row_value(ensayo, "id_Ensayo", "id_ensayo"))
+            mapa[ensayo_id] = residuos_ordenados[indice] if indice < len(residuos_ordenados) else None
         return mapa
 
-    def _construir_frame(self, db: Session) -> pd.DataFrame:
-        ensayos, mezclas, residuos, componentes = self._cargar_tablas(db)
+    def _construir_frame(self, client: Any) -> pd.DataFrame:
+        ensayos, mezclas, residuos, componentes = self._cargar_tablas(client)
         base_por_ensayo = self._inferir_residuo_base(ensayos, residuos)
 
         registros: list[dict[str, Any]] = []
-        for ensayo in sorted(ensayos, key=lambda e: _natural_key(e.id_Ensayo)):
-            mezcla = mezclas.get(ensayo.id_mezcla)
+        for ensayo in sorted(ensayos, key=lambda e: _natural_key(str(_row_value(e, "id_Ensayo", "id_ensayo")))):
+            ensayo_id = str(_row_value(ensayo, "id_Ensayo", "id_ensayo"))
+            id_mezcla = str(_row_value(ensayo, "id_mezcla"))
+            mezcla = mezclas.get(id_mezcla)
             if mezcla is None:
-                raise ValueError(f"No existe la mezcla '{ensayo.id_mezcla}' para el ensayo '{ensayo.id_Ensayo}'.")
+                raise ValueError(f"No existe la mezcla '{id_mezcla}' para el ensayo '{ensayo_id}'.")
 
-            componentes_mezcla = componentes.get(mezcla.Id_Mezcla, [])
-            residuo_base = base_por_ensayo.get(ensayo.id_Ensayo)
+            mezcla_id = str(_row_value(mezcla, "Id_Mezcla", "id_mezcla"))
+            componentes_mezcla = componentes.get(mezcla_id, [])
+            residuo_base = base_por_ensayo.get(ensayo_id)
 
             fila: dict[str, Any] = {
-                "id_ensayo": ensayo.id_Ensayo,
-                "id_mezcla": ensayo.id_mezcla,
-                "residuo_base": residuo_base.nombre if residuo_base is not None else None,
-                "Temperatura": _to_float(ensayo.temperatura),
-                "Relacion_C_N": _parse_relacion_cn(mezcla.nombre),
-                "Larva_Humedad": _to_float(ensayo.larva_humedad),
-                "Larva_N_Organico": _to_float(ensayo.larva_n_organico),
-                "Larva_Extracto_Etereo": _to_float(ensayo.larva_extracto_etereo),
-                "Larva_Proteina": _to_float(ensayo.larva_proteina),
-                "Frass_Humedad": _to_float(ensayo.frass_humedad),
-                "Frass_pH": _to_float(ensayo.frass_ph),
-                "Frass_Cenizas": _to_float(ensayo.frass_cenizas),
-                "Frass_C_Organico": _to_float(ensayo.frass_c_organico),
-                "Frass_N_Total": _to_float(ensayo.frass_n_total),
-                "Frass_C_N": _to_float(ensayo.frass_c_n),
-                "Frass_Fosforo": _to_float(ensayo.frass_fosforo),
-                "Frass_Potasio": _to_float(ensayo.frass_potasio),
-                "Frass_Densidad": _to_float(ensayo.frass_densidad),
-                "Tasa_Bioconversion": _to_float(ensayo.tasa_bioconversion),
+                "id_ensayo": ensayo_id,
+                "id_mezcla": id_mezcla,
+                "residuo_base": _row_value(residuo_base, "nombre") if residuo_base is not None else None,
+                "Temperatura": _to_float(_row_value(ensayo, "temperatura")),
+                "Relacion_C_N": _parse_relacion_cn(str(_row_value(mezcla, "nombre", default=""))),
+                "Larva_Humedad": _to_float(_row_value(ensayo, "larva_humedad")),
+                "Larva_N_Organico": _to_float(_row_value(ensayo, "larva_n_organico")),
+                "Larva_Extracto_Etereo": _to_float(_row_value(ensayo, "larva_extracto_etereo")),
+                "Larva_Proteina": _to_float(_row_value(ensayo, "larva_proteina")),
+                "Frass_Humedad": _to_float(_row_value(ensayo, "frass_humedad")),
+                "Frass_pH": _to_float(_row_value(ensayo, "frass_ph")),
+                "Frass_Cenizas": _to_float(_row_value(ensayo, "frass_cenizas")),
+                "Frass_C_Organico": _to_float(_row_value(ensayo, "frass_c_organico")),
+                "Frass_N_Total": _to_float(_row_value(ensayo, "frass_n_total")),
+                "Frass_C_N": _to_float(_row_value(ensayo, "frass_c_n")),
+                "Frass_Fosforo": _to_float(_row_value(ensayo, "frass_fosforo")),
+                "Frass_Potasio": _to_float(_row_value(ensayo, "frass_potasio")),
+                "Frass_Densidad": _to_float(_row_value(ensayo, "frass_densidad")),
+                "Tasa_Bioconversion": _to_float(_row_value(ensayo, "tasa_bioconversion")),
             }
 
             if residuo_base is not None:
                 for salida, atributo in self._residuo_keys_base:
-                    fila[salida] = _to_float(getattr(residuo_base, atributo))
+                    fila[salida] = _to_float(_row_value(residuo_base, atributo))
             else:
                 for salida, _ in self._residuo_keys_base:
                     fila[salida] = None
@@ -274,8 +290,11 @@ class MotorCalculo:
             "tasa_bioconversion": _to_float(row.get("Tasa_Bioconversion")),
         }
 
-    def calcular_predicciones(self, db: Session) -> dict[str, Any]:
-        frame = self._construir_frame(db)
+    def calcular_predicciones(self, client: Any | None = None) -> dict[str, Any]:
+        if client is None:
+            client = get_supabase_client()
+
+        frame = self._construir_frame(client)
         if frame.empty:
             raise ValueError("No hay ensayos disponibles para calcular predicciones.")
 
@@ -300,8 +319,8 @@ class MotorCalculo:
             "resultados": registros,
         }
 
-    def calcular_prediccion_ensayo(self, db: Session, id_ensayo: str) -> dict[str, Any]:
-        lote = self.calcular_predicciones(db)
+    def calcular_prediccion_ensayo(self, client: Any | None = None, id_ensayo: str = "") -> dict[str, Any]:
+        lote = self.calcular_predicciones(client)
         for registro in lote["resultados"]:
             if registro["id_ensayo"] == id_ensayo:
                 return registro
